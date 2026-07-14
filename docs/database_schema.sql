@@ -1,0 +1,7 @@
+-- See db.py for the executable migration-aware schema.
+-- Main entities:
+-- search_runs
+-- candidates
+-- regulations
+-- intelligence_records
+-- review_history
