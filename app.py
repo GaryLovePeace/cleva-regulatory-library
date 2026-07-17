@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 
 import streamlit as st
@@ -8,10 +9,31 @@ import db
 from config import SETTINGS
 from exporters import intelligence_to_xlsx, regulation_to_docx, regulations_to_xlsx
 from llm import analyze_document
-from search import build_query_variants, enrich_result, search_all
+from search import build_query_variants, detect_query_intent, enrich_result, resolve_jurisdictions, search_all
 from source_registry import JURISDICTIONS, SOURCES, TOPICS, filtered_sources, source_rows
 
 st.set_page_config(page_title="Cleva Regulatory Library", page_icon="📚", layout="wide")
+
+
+def require_access() -> None:
+    """Require an optional shared password before exposing API-backed features."""
+    expected = SETTINGS.app_password.strip()
+    if not expected or st.session_state.get("cleva_authenticated"):
+        return
+
+    st.title("Cleva Global Regulatory Library")
+    st.caption("公司法规情报与人工审核知识库")
+    entered = st.text_input("访问密码", type="password")
+    if st.button("进入系统", type="primary"):
+        if entered and hmac.compare_digest(entered, expected):
+            st.session_state["cleva_authenticated"] = True
+            st.rerun()
+        else:
+            st.error("访问密码不正确。")
+    st.stop()
+
+
+require_access()
 db.init_db()
 
 st.title("Cleva Global Regulatory Library")
@@ -24,7 +46,9 @@ with st.sidebar:
     model_name = SETTINGS.deepseek_model if SETTINGS.llm_provider == "deepseek" else SETTINGS.openai_model
     st.write(f"LLM model: `{model_name}`")
     st.warning("AI结果仅供初筛。第三方解读不能直接替代官方法规原文。")
-    st.caption("v0.2：新增专业信息源、快速/官方/深度检索，以及法规库与情报库分流。")
+    st.caption("v0.3：新增法规编号识别、州/联邦智能路由、官方源优先排序和低相关结果过滤。")
+    if SETTINGS.deployment_mode == "cloud_demo":
+        st.warning("云端演示版当前使用本地 SQLite。应用重启或重新部署后，新增数据可能丢失；正式公司版应改用持久数据库。")
 
 search_tab, review_tab, library_tab, intelligence_tab, sources_tab = st.tabs(
     ["🔎 实时搜索", "✅ 待审核", "📚 正式法规库", "📰 法规情报库", "🌐 信息源中心"]
@@ -87,8 +111,18 @@ with search_tab:
         use_ai = st.checkbox("使用AI整理字段", value=SETTINGS.llm_provider != "none")
 
     if query.strip():
+        intent = detect_query_intent(query)
         variants = build_query_variants(query, topic, search_mode)
+        effective_jurisdictions = resolve_jurisdictions(query, jurisdictions)
         st.caption(f"本次将执行 {len(variants)} 组关键词；可检索的信息源约 {len(available_sources)} 个。")
+        if intent.notes:
+            st.info("智能识别：" + "；".join(intent.notes))
+        if effective_jurisdictions != jurisdictions:
+            st.warning(
+                "根据搜索词，本次实际检索范围已自动调整为："
+                + ", ".join(effective_jurisdictions)
+                + "。界面中的原选择不会被改写。"
+            )
 
     if st.button("开始实时搜索", type="primary", disabled=not query.strip() or not jurisdictions):
         run_id = db.create_search_run(query, jurisdictions, topic, provider, search_mode)
@@ -122,7 +156,14 @@ with search_tab:
             saved.append((candidate_id, item))
             progress.progress((idx + 1) / max(len(raw_results), 1))
         st.session_state["latest_results"] = saved
-        st.success(f"已找到并保存 {len(saved)} 条候选结果，全部进入待审核区。")
+        if saved:
+            st.success(f"已找到并保存 {len(saved)} 条高相关候选结果，全部进入待审核区。")
+        else:
+            detected = detect_query_intent(query)
+            if detected.is_exact_legal_citation:
+                st.warning("没有找到达到精确编号匹配阈值的结果。系统已主动隐藏不含目标法规/法案编号的网页，请尝试仅选择对应州、补充年份或使用深度检索。")
+            else:
+                st.warning("没有找到达到相关度阈值的结果，请调整地区、主题或关键词。")
 
     for candidate_id, item in st.session_state.get("latest_results", []):
         ai = item.get("ai_data") or {}
@@ -131,12 +172,15 @@ with search_tab:
         with st.expander(f"{label}  |  {item.get('source_name')}  |  {source_badge}"):
             st.markdown(f"[打开来源页面]({item.get('url')})")
             st.write(item.get("snippet") or "")
-            cols = st.columns(5)
-            cols[0].metric("来源等级", item.get("source_level") or "-")
-            cols[1].metric("来源类型", item.get("source_type") or "-")
-            cols[2].metric("地区", item.get("jurisdiction_group") or "-")
-            cols[3].metric("建议记录类型", ai.get("record_type") or "待审核")
-            cols[4].metric("相关度", ai.get("relevance_level") or "待审核")
+            cols = st.columns(6)
+            cols[0].metric("检索匹配分", item.get("relevance_score", 0))
+            cols[1].metric("来源等级", item.get("source_level") or "-")
+            cols[2].metric("来源类型", item.get("source_type") or "-")
+            cols[3].metric("地区", item.get("jurisdiction_group") or "-")
+            cols[4].metric("建议记录类型", ai.get("record_type") or "待审核")
+            cols[5].metric("AI相关度", ai.get("relevance_level") or "待审核")
+            if item.get("relevance_reasons"):
+                st.caption("排序依据：" + "；".join(item["relevance_reasons"][:5]))
             if item.get("verification_required"):
                 st.warning("该页面不是法律原文，入正式法规库前必须找到并核验其引用的政府或法规数据库链接。")
             if ai.get("summary_cn"):

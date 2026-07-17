@@ -27,6 +27,8 @@ class Settings:
     deep_search_queries: int = int(os.getenv("DEEP_SEARCH_QUERIES", "4"))
     max_fetch_chars: int = int(os.getenv("MAX_FETCH_CHARS", "60000"))
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "25"))
+    app_password: str = os.getenv("APP_PASSWORD", "")
+    deployment_mode: str = os.getenv("DEPLOYMENT_MODE", "local").lower()
 
 
 SETTINGS = Settings()

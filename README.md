@@ -1,4 +1,4 @@
-# Cleva Global Regulatory Library MVP v0.2
+# Cleva Global Regulatory Library MVP v0.3
 
 这一版将知识库拆成两类记录：
 
@@ -7,7 +7,17 @@
 
 第三方页面不会被系统直接当成正式法规。人工审核时，只有补充并核验官方法规链接后，才能作为正式法规入库。
 
-## v0.2新增功能
+## v0.3重点改进
+
+- 识别 `California SB343`、`EU 2025/40` 等法规编号；
+- 州级法案自动排除美国联邦来源；
+- 对法规编号使用精确短语搜索和州级优先来源；
+- 对搜索结果进行本地相关度评分，隐藏不含目标编号的网页；
+- A/B级官方来源优先，展示排序理由；
+- 自动拆分过长域名查询，避免Brave 422错误；
+- 新增California Governor和Intertek全球法规源。
+
+## v0.2已有功能
 
 - 信息源中心：统一维护官方来源和专业信息源；
 - 已加入以下专业来源：
@@ -104,3 +114,15 @@ data/regulatory_library.sqlite3
 ```
 
 建议升级前仍复制一份数据库作为备份。
+
+## 7. GitHub 与 Streamlit Cloud 部署
+
+部署版已经包含：
+
+- `.gitignore`：排除 `.env`、API Key、虚拟环境和本地 SQLite；
+- `.streamlit/secrets.toml.example`：Streamlit Cloud 密钥模板；
+- 可选 `APP_PASSWORD` 访问保护；
+- 云端 SQLite 非持久化风险提示；
+- 详细步骤见 `DEPLOY_TO_STREAMLIT.md`。
+
+在线演示可以继续使用 SQLite；正式内部知识库应切换到持久数据库。

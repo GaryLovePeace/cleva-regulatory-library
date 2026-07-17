@@ -130,6 +130,13 @@ SOURCES: list[dict[str, object]] = [
     },
     # ---------------- US states ----------------
     {
+        "domain": "gov.ca.gov", "name": "California Governor", "level": "B",
+        "source_type": "Regulator / government guidance", "is_official": True,
+        "markets": ["US States"], "topics": ["All"],
+        "monitoring_urls": ["https://www.gov.ca.gov/"],
+        "notes": "加州州长签署法案公告和政策发布。",
+    },
+    {
         "domain": "calrecycle.ca.gov", "name": "CalRecycle", "level": "B",
         "source_type": "Regulator / government guidance", "is_official": True,
         "markets": ["US States"], "topics": ["Packaging / PPWR / EPR", "WEEE / Waste", "Batteries"],
@@ -250,6 +257,13 @@ SOURCES: list[dict[str, object]] = [
         "notes": "阿尔伯塔省法规和指南。",
     },
     # ---------------- Curated professional / intelligence sources ----------------
+    {
+        "domain": "intertek.com", "name": "Intertek Global Regulatory Insights", "level": "C",
+        "source_type": "Testing / certification body", "is_official": False,
+        "markets": ["Global"], "topics": ["All"],
+        "monitoring_urls": ["https://www.intertek.com/knowledge-education/"],
+        "notes": "Intertek全球法规快讯与产品合规解读；正式结论需回到官方原文。",
+    },
     {
         "domain": "intertek.com.cn", "name": "Intertek China Regulatory & Standards", "level": "C",
         "source_type": "Testing / certification body", "is_official": False,
