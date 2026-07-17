@@ -11,6 +11,7 @@ from exporters import intelligence_to_xlsx, regulation_to_docx, regulations_to_x
 from llm import analyze_document
 from search import build_query_variants, detect_query_intent, enrich_result, resolve_jurisdictions, search_all
 from source_registry import JURISDICTIONS, SOURCES, TOPICS, filtered_sources, source_rows
+from us_state_sources import US_STATE_NAMES
 
 st.set_page_config(page_title="Cleva Regulatory Library", page_icon="📚", layout="wide")
 
@@ -46,7 +47,7 @@ with st.sidebar:
     model_name = SETTINGS.deepseek_model if SETTINGS.llm_provider == "deepseek" else SETTINGS.openai_model
     st.write(f"LLM model: `{model_name}`")
     st.warning("AI结果仅供初筛。第三方解读不能直接替代官方法规原文。")
-    st.caption("v0.3：新增法规编号识别、州/联邦智能路由、官方源优先排序和低相关结果过滤。")
+    st.caption("v0.4：覆盖美国50州＋Washington, D.C.，支持多种州级法案编号、州立法网站和环境主管部门智能路由。")
     if SETTINGS.deployment_mode == "cloud_demo":
         st.warning("云端演示版当前使用本地 SQLite。应用重启或重新部署后，新增数据可能丢失；正式公司版应改用持久数据库。")
 
@@ -77,6 +78,21 @@ with search_tab:
         default=["EU"],
     )
 
+    selected_states: list[str] = []
+    detected_state = detect_query_intent(query).state if query.strip() else None
+    if "US States" in jurisdictions:
+        selected_states = st.multiselect(
+            "美国州/特区（可选；搜索词已写明州名时可留空）",
+            US_STATE_NAMES,
+            help="覆盖美国50州及Washington, D.C.。只选一个州时，也可以只输入法案编号，例如 HB 1234。",
+        )
+        if detected_state and not selected_states:
+            st.caption(f"已从搜索词识别州/特区：{detected_state}")
+        elif not detected_state and not selected_states:
+            st.warning("州级检索建议在搜索词中写明州名，或在这里选择州；否则官方来源范围过大，结果可能不够聚焦。")
+
+    effective_selected_states = selected_states or ([detected_state] if detected_state else [])
+
     c3, c4 = st.columns([1, 2])
     with c3:
         mode_label = st.selectbox("检索模式", list(SEARCH_MODES))
@@ -93,8 +109,13 @@ with search_tab:
         jurisdictions or JURISDICTIONS,
         scope="official" if search_mode == "official" else "curated",
         topic=topic,
+        selected_states=effective_selected_states or None,
     )
-    source_options = {f"{source['name']}  [{source['level']}]": str(source["domain"]) for source in available_sources}
+    source_options = {
+        f"{source['name']}  [{source['level']}]"
+        + (f" · {source.get('state')}" if source.get("state") else ""): str(source["domain"])
+        for source in available_sources
+    }
     selected_source_labels = st.multiselect(
         "指定信息源（可选；不选择则搜索当前地区和主题下的全部已维护来源）",
         list(source_options),
@@ -111,12 +132,15 @@ with search_tab:
         use_ai = st.checkbox("使用AI整理字段", value=SETTINGS.llm_provider != "none")
 
     if query.strip():
-        intent = detect_query_intent(query)
-        variants = build_query_variants(query, topic, search_mode)
-        effective_jurisdictions = resolve_jurisdictions(query, jurisdictions)
+        state_hint = effective_selected_states[0] if len(effective_selected_states) == 1 else None
+        intent = detect_query_intent(query, state_hint)
+        variants = build_query_variants(query, topic, search_mode, state_hint)
+        effective_jurisdictions = resolve_jurisdictions(query, jurisdictions, state_hint)
         st.caption(f"本次将执行 {len(variants)} 组关键词；可检索的信息源约 {len(available_sources)} 个。")
         if intent.notes:
             st.info("智能识别：" + "；".join(intent.notes))
+        if effective_selected_states:
+            st.caption("本次州级来源范围：" + ", ".join(effective_selected_states))
         if effective_jurisdictions != jurisdictions:
             st.warning(
                 "根据搜索词，本次实际检索范围已自动调整为："
@@ -134,6 +158,7 @@ with search_tab:
                 search_mode=search_mode,
                 topic=topic,
                 selected_domains=selected_domains or None,
+                selected_states=effective_selected_states or None,
             )
         except Exception as exc:  # noqa: BLE001
             st.error(f"搜索失败：{exc}")
@@ -159,9 +184,11 @@ with search_tab:
         if saved:
             st.success(f"已找到并保存 {len(saved)} 条高相关候选结果，全部进入待审核区。")
         else:
-            detected = detect_query_intent(query)
-            if detected.is_exact_legal_citation:
-                st.warning("没有找到达到精确编号匹配阈值的结果。系统已主动隐藏不含目标法规/法案编号的网页，请尝试仅选择对应州、补充年份或使用深度检索。")
+            detected = detect_query_intent(query, effective_selected_states[0] if len(effective_selected_states) == 1 else None)
+            if detected.kind == "us_state_bill_missing_state":
+                st.warning("已识别到法案编号，但没有州信息。请在搜索词中加入州名，或使用上方美国州/特区筛选。")
+            elif detected.is_exact_legal_citation:
+                st.warning("没有找到达到精确编号匹配阈值的结果。系统已主动隐藏不含目标法规/法案编号的网页，请补充年份、调整主题或使用深度检索。")
             else:
                 st.warning("没有找到达到相关度阈值的结果，请调整地区、主题或关键词。")
 

@@ -1,11 +1,32 @@
+# Secrets
 .env
-.venv/
-__pycache__/
-*.pyc
-.DS_Store
-
+.env.*
+!.env.example
 .streamlit/secrets.toml
 
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local databases and runtime data
 data/*.sqlite3
+data/*.sqlite3-*
 data/*.db
-data/*.backup*
+!data/.gitkeep
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Logs and temporary exports
+*.log
+*.tmp
+~$*

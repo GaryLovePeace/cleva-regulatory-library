@@ -14,8 +14,17 @@ from pypdf import PdfReader
 
 from config import SETTINGS
 from source_registry import all_domains, source_metadata
+from us_state_sources import (
+    bill_prefix_allowed,
+    detect_state,
+    domain_belongs_to_state,
+    full_bill_name,
+    normalize_bill_prefix,
+    state_abbreviation,
+    state_domains,
+)
 
-USER_AGENT = "Cleva-Regulatory-Library/0.3 (+human-review-required)"
+USER_AGENT = "Cleva-Regulatory-Library/0.4 (+human-review-required)"
 
 TOPIC_KEYWORDS: dict[str, list[str]] = {
     "Product Safety": ["product safety", "consumer product safety", "recall", "market surveillance"],
@@ -62,29 +71,6 @@ CHINESE_QUERY_TERMS: dict[str, str] = {
     "运输": "transport dangerous goods",
 }
 
-STATE_ALIASES: dict[str, tuple[str, ...]] = {
-    "California": ("california", "calif", "ca", "加州"),
-    "Washington": ("washington", "wa", "华盛顿州"),
-    "Oregon": ("oregon", "or", "俄勒冈州"),
-    "Colorado": ("colorado", "co", "科罗拉多州"),
-    "Minnesota": ("minnesota", "mn", "明尼苏达州"),
-}
-
-STATE_PRIORITY_DOMAINS: dict[str, list[str]] = {
-    "California": [
-        "leginfo.legislature.ca.gov",
-        "calrecycle.ca.gov",
-        "gov.ca.gov",
-        "oehha.ca.gov",
-        "dtsc.ca.gov",
-        "intertek.com",
-    ],
-    "Washington": ["apps.leg.wa.gov"],
-    "Oregon": ["oregonlegislature.gov"],
-    "Colorado": ["leg.colorado.gov"],
-    "Minnesota": ["revisor.mn.gov"],
-}
-
 FEDERAL_DOMAINS = {"federalregister.gov", "ecfr.gov", "regulations.gov"}
 
 
@@ -119,41 +105,59 @@ class SearchResult:
         return asdict(self)
 
 
-def _contains_alias(text: str, alias: str) -> bool:
-    if len(alias) <= 2 and alias.isascii():
-        return bool(re.search(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE))
-    return alias.lower() in text.lower()
+def _bill_match(raw: str) -> tuple[str, str] | None:
+    # Long prefixes are intentionally listed first. Dots and spaces are accepted,
+    # e.g. H.B. 123, SB343, LD 1541, A-1234.
+    prefix_pattern = r"HJR|SJR|HCR|SCR|ACA|SCA|AJR|ACR|HSB|SSB|HB|SB|AB|HF|SF|HR|SR|LD|LB|LR|HP|SP|PR|B|H|S|A|J|K"
+    match = re.search(
+        rf"(?<![A-Za-z])({prefix_pattern})(?:\.|\s)*[- ]?\s*(\d{{1,6}}(?:-\d{{1,6}})?)(?!\d)",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return normalize_bill_prefix(match.group(1)), match.group(2)
+
+    full_match = re.search(
+        r"\b(House|Senate|Assembly)\s+(Bill|File)\s+(\d{1,6})\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not full_match:
+        return None
+    chamber = full_match.group(1).lower()
+    doc_type = full_match.group(2).lower()
+    if doc_type == "file":
+        prefix = "HF" if chamber == "house" else "SF"
+    elif chamber == "assembly":
+        prefix = "AB"
+    else:
+        prefix = "HB" if chamber == "house" else "SB"
+    return prefix, full_match.group(3)
 
 
-def detect_query_intent(query: str) -> QueryIntent:
+def detect_query_intent(query: str, state_hint: str | None = None) -> QueryIntent:
     raw = " ".join(query.split())
-    lower = raw.lower()
-    state: str | None = None
-    for state_name, aliases in STATE_ALIASES.items():
-        if any(_contains_alias(raw, alias) for alias in aliases):
-            state = state_name
-            break
+    state = detect_state(raw, state_hint)
+    bill = _bill_match(raw)
 
-    bill_match = re.search(r"\b(SB|AB)\s*[- ]?\s*(\d{1,4})\b", raw, flags=re.IGNORECASE)
-    if bill_match and state:
-        bill_type = bill_match.group(1).upper()
-        number = bill_match.group(2)
-        full_type = "Senate Bill" if bill_type == "SB" else "Assembly Bill"
+    if bill and state and bill_prefix_allowed(state, bill[0]):
+        bill_type, number = bill
         citation = f"{bill_type} {number}"
+        abbr = state_abbreviation(state)
         notes = (
             f"识别为{state}州级法案编号检索",
-            "自动排除美国联邦来源并优先州立法机构及主管部门",
+            "自动排除美国联邦来源，并仅搜索该州立法机构和环境主管部门",
             "结果必须包含准确法案编号才会保留",
         )
         return QueryIntent(
             kind="us_state_bill",
             citation=citation,
             compact_citation=f"{bill_type}{number}",
-            full_citation=f"{full_type} {number}",
+            full_citation=f"{full_bill_name(bill_type)} {number}",
             state=state,
             inferred_jurisdictions=("US States",),
-            priority_domains=tuple(STATE_PRIORITY_DOMAINS.get(state, [])),
-            notes=notes,
+            priority_domains=tuple(state_domains(state)),
+            notes=notes + ((f"州缩写：{abbr}",) if abbr else ()),
         )
 
     eu_match = re.search(
@@ -178,15 +182,26 @@ def detect_query_intent(query: str) -> QueryIntent:
             kind="us_state_general",
             state=state,
             inferred_jurisdictions=("US States",),
-            priority_domains=tuple(STATE_PRIORITY_DOMAINS.get(state, [])),
-            notes=(f"识别到{state}，优先州级来源",),
+            priority_domains=tuple(state_domains(state)),
+            notes=(f"识别到{state}，本次仅搜索该州官方来源及精选专业来源",),
+        )
+
+    if bill and not state:
+        return QueryIntent(
+            kind="us_state_bill_missing_state",
+            citation=f"{bill[0]} {bill[1]}",
+            compact_citation=f"{bill[0]}{bill[1]}",
+            full_citation=f"{full_bill_name(bill[0])} {bill[1]}",
+            notes=("识别到州级法案编号，但无法判断州；请选择美国州筛选或在搜索词中写明州名",),
         )
 
     return QueryIntent()
 
 
-def resolve_jurisdictions(query: str, jurisdictions: list[str]) -> list[str]:
-    intent = detect_query_intent(query)
+def resolve_jurisdictions(
+    query: str, jurisdictions: list[str], state_hint: str | None = None
+) -> list[str]:
+    intent = detect_query_intent(query, state_hint)
     if intent.inferred_jurisdictions:
         return list(intent.inferred_jurisdictions)
     return jurisdictions
@@ -197,12 +212,15 @@ def add_english_terms(query: str) -> str:
     return " ".join([query, *additions]).strip()
 
 
-def build_query_variants(query: str, topic: str, search_mode: str) -> list[str]:
-    intent = detect_query_intent(query)
+def build_query_variants(
+    query: str, topic: str, search_mode: str, state_hint: str | None = None
+) -> list[str]:
+    intent = detect_query_intent(query, state_hint)
     base = add_english_terms(query)
 
     if intent.kind == "us_state_bill" and intent.citation and intent.state:
         exact = f'"{intent.citation}" "{intent.state}"'
+        abbr = state_abbreviation(intent.state)
         if search_mode != "deep":
             return [exact]
         variants = [
@@ -210,6 +228,8 @@ def build_query_variants(query: str, topic: str, search_mode: str) -> list[str]:
             f'"{intent.full_citation}" "{intent.state}"',
             f'"{intent.compact_citation}" "{intent.state}"',
         ]
+        if abbr:
+            variants.append(f'"{intent.citation}" "{abbr}"')
         topic_terms = TOPIC_KEYWORDS.get(topic, []) if topic and topic != "All" else []
         if topic_terms:
             variants.append(f"{exact} {' '.join(topic_terms[:2])}")
@@ -251,7 +271,7 @@ def _dedupe_queries(queries: Iterable[str]) -> list[str]:
 
 def _rank_domains(domains: list[str], intent: QueryIntent, search_mode: str) -> list[str]:
     unique = list(dict.fromkeys(domains))
-    priority = [domain for domain in intent.priority_domains if domain in unique]
+    priority = list(dict.fromkeys(domain for domain in intent.priority_domains if domain in unique))
     remainder = [domain for domain in unique if domain not in priority]
 
     # Exact legal citations should not be diluted across dozens of unrelated sources.
@@ -424,7 +444,11 @@ def _score_result(
         if intent.state.lower() in combined_lower:
             score += 25
             reasons.append(f"匹配{intent.state} +25")
-        if domain in set(STATE_PRIORITY_DOMAINS.get(intent.state, [])):
+        abbr = state_abbreviation(intent.state)
+        if abbr and re.search(rf"\b{re.escape(abbr)}\b", combined):
+            score += 8
+            reasons.append(f"匹配州缩写{abbr} +8")
+        if domain_belongs_to_state(domain, intent.state):
             score += 35
             reasons.append("州级优先来源 +35")
         if domain in FEDERAL_DOMAINS:
@@ -461,6 +485,8 @@ def _minimum_score(intent: QueryIntent) -> int:
         return 40
     if intent.kind == "us_state_general":
         return 5
+    if intent.kind == "us_state_bill_missing_state":
+        return 10_000
     return -20
 
 
@@ -472,16 +498,28 @@ def search_all(
     search_mode: str = "quick",
     topic: str = "All",
     selected_domains: list[str] | None = None,
+    selected_states: list[str] | None = None,
 ) -> list[SearchResult]:
     provider = (provider or SETTINGS.search_provider).lower()
-    intent = detect_query_intent(query)
-    effective_jurisdictions = resolve_jurisdictions(query, jurisdictions)
+    state_hint = selected_states[0] if selected_states and len(selected_states) == 1 else None
+    intent = detect_query_intent(query, state_hint)
+    effective_jurisdictions = resolve_jurisdictions(query, jurisdictions, state_hint)
     scope = "official" if search_mode == "official" else "curated"
-    domains = all_domains(effective_jurisdictions, scope=scope, topic=topic, selected_domains=selected_domains)
+    effective_states = [intent.state] if intent.state else (selected_states or None)
+    domains = all_domains(
+        effective_jurisdictions,
+        scope=scope,
+        topic=topic,
+        selected_domains=selected_domains,
+        selected_states=effective_states,
+    )
     domains = _rank_domains(domains, intent, search_mode)
-    variants = build_query_variants(query, topic, search_mode)
+    variants = build_query_variants(query, topic, search_mode, state_hint)
     results: list[SearchResult] = []
     errors: list[str] = []
+
+    if intent.kind == "us_state_bill_missing_state":
+        return []
 
     # Do not query Federal Register for an explicitly state-level bill.
     if "US Federal" in effective_jurisdictions and search_mode in {"official", "deep"} and not intent.state:

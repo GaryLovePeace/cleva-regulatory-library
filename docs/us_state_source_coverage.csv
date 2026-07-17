@@ -1,0 +1,52 @@
+﻿state,abbreviation,bill_prefixes,legislature_domains,environment_domains
+District of Columbia,DC,"B, PR","lims.dccouncil.gov, code.dccouncil.gov",doee.dc.gov
+Alabama,AL,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.state.al.us,adem.alabama.gov
+Alaska,AK,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",akleg.gov,dec.alaska.gov
+Arizona,AZ,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","azleg.gov, apps.azleg.gov",azdeq.gov
+Arkansas,AR,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",arkleg.state.ar.us,adeq.state.ar.us
+California,CA,"AB, SB, ACA, SCA, AJR, SJR, ACR, SCR, HR, SR",leginfo.legislature.ca.gov,"calepa.ca.gov, calrecycle.ca.gov, dtsc.ca.gov, oehha.ca.gov, ww2.arb.ca.gov"
+Colorado,CO,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",leg.colorado.gov,cdphe.colorado.gov
+Connecticut,CT,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",cga.ct.gov,portal.ct.gov
+Delaware,DE,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legis.delaware.gov,dnrec.delaware.gov
+Florida,FL,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","flsenate.gov, myfloridahouse.gov",floridadep.gov
+Georgia,GA,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legis.ga.gov,epd.georgia.gov
+Hawaii,HI,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",capitol.hawaii.gov,health.hawaii.gov
+Idaho,ID,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.idaho.gov,deq.idaho.gov
+Illinois,IL,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",ilga.gov,epa.illinois.gov
+Indiana,IN,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",iga.in.gov,in.gov
+Iowa,IA,"HF, SF, HSB, SSB, HJR, SJR, HCR, SCR, HR, SR",legis.iowa.gov,iowadnr.gov
+Kansas,KS,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",kslegislature.gov,kdhe.ks.gov
+Kentucky,KY,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.ky.gov,eec.ky.gov
+Louisiana,LA,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legis.la.gov,deq.louisiana.gov
+Maine,ME,"LD, HP, SP",legislature.maine.gov,maine.gov
+Maryland,MD,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",mgaleg.maryland.gov,mde.maryland.gov
+Massachusetts,MA,"H, S",malegislature.gov,mass.gov
+Michigan,MI,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.mi.gov,michigan.gov
+Minnesota,MN,"HF, SF, H, S","revisor.mn.gov, house.mn.gov, senate.mn",pca.state.mn.us
+Mississippi,MS,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.ms.gov,mdeq.ms.gov
+Missouri,MO,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","house.mo.gov, senate.mo.gov",dnr.mo.gov
+Montana,MT,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","legmt.gov, laws.leg.mt.gov",deq.mt.gov
+Nebraska,NE,"LB, LR",nebraskalegislature.gov,dee.nebraska.gov
+Nevada,NV,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",leg.state.nv.us,ndep.nv.gov
+New Hampshire,NH,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",gc.nh.gov,des.nh.gov
+New Jersey,NJ,"A, S, ACR, SCR, AJR, SJR, AR, SR",njleg.state.nj.us,dep.nj.gov
+New Mexico,NM,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",nmlegis.gov,env.nm.gov
+New York,NY,"A, S, J, K","nysenate.gov, nyassembly.gov",dec.ny.gov
+North Carolina,NC,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",ncleg.gov,deq.nc.gov
+North Dakota,ND,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",ndlegis.gov,deq.nd.gov
+Ohio,OH,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.ohio.gov,epa.ohio.gov
+Oklahoma,OK,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",oklegislature.gov,deq.ok.gov
+Oregon,OR,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",oregonlegislature.gov,oregon.gov
+Pennsylvania,PA,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legis.state.pa.us,dep.pa.gov
+Rhode Island,RI,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",rilegislature.gov,dem.ri.gov
+South Carolina,SC,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",scstatehouse.gov,des.sc.gov
+South Dakota,SD,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",sdlegislature.gov,danr.sd.gov
+Tennessee,TN,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",capitol.tn.gov,tn.gov
+Texas,TX,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",capitol.texas.gov,tceq.texas.gov
+Utah,UT,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",le.utah.gov,deq.utah.gov
+Vermont,VT,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",legislature.vermont.gov,dec.vermont.gov
+Virginia,VA,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",lis.virginia.gov,deq.virginia.gov
+Washington,WA,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","app.leg.wa.gov, leg.wa.gov",ecology.wa.gov
+West Virginia,WV,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",wvlegislature.gov,dep.wv.gov
+Wisconsin,WI,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B","legis.wisconsin.gov, docs.legis.wisconsin.gov",dnr.wisconsin.gov
+Wyoming,WY,"HB, SB, AB, HF, SF, HJR, SJR, HCR, SCR, HR, SR, LD, LB, H, S, A, B",wyoleg.gov,deq.wyoming.gov

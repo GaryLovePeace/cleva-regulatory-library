@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Iterable
 from urllib.parse import urlparse
 
+from us_state_sources import build_us_state_source_records
+
 # Levels used by the MVP:
 # A = official legislation / official legal database
 # B = regulator, government guidance, official notification or authorised operator
@@ -128,70 +130,11 @@ SOURCES: list[dict[str, object]] = [
         "monitoring_urls": ["https://www.phmsa.dot.gov/"],
         "notes": "危险品及锂电池运输。",
     },
-    # ---------------- US states ----------------
-    {
-        "domain": "gov.ca.gov", "name": "California Governor", "level": "B",
-        "source_type": "Regulator / government guidance", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://www.gov.ca.gov/"],
-        "notes": "加州州长签署法案公告和政策发布。",
-    },
-    {
-        "domain": "calrecycle.ca.gov", "name": "CalRecycle", "level": "B",
-        "source_type": "Regulator / government guidance", "is_official": True,
-        "markets": ["US States"], "topics": ["Packaging / PPWR / EPR", "WEEE / Waste", "Batteries"],
-        "monitoring_urls": ["https://calrecycle.ca.gov/"],
-        "notes": "加州包装、回收和生产者责任。",
-    },
-    {
-        "domain": "oehha.ca.gov", "name": "California OEHHA", "level": "B",
-        "source_type": "Regulator / government guidance", "is_official": True,
-        "markets": ["US States"], "topics": ["Chemicals / REACH / RoHS / PFAS", "Labelling / Instructions"],
-        "monitoring_urls": ["https://oehha.ca.gov/proposition-65"],
-        "notes": "California Proposition 65。",
-    },
-    {
-        "domain": "dtsc.ca.gov", "name": "California DTSC", "level": "B",
-        "source_type": "Regulator / government guidance", "is_official": True,
-        "markets": ["US States"], "topics": ["Chemicals / REACH / RoHS / PFAS", "WEEE / Waste"],
-        "monitoring_urls": ["https://dtsc.ca.gov/"],
-        "notes": "加州有害物质和Safer Consumer Products。",
-    },
-    {
-        "domain": "leginfo.legislature.ca.gov", "name": "California Legislature", "level": "A",
-        "source_type": "Official legislation", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://leginfo.legislature.ca.gov/"],
-        "notes": "加州法案和法典。",
-    },
-    {
-        "domain": "apps.leg.wa.gov", "name": "Washington Legislature", "level": "A",
-        "source_type": "Official legislation", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://apps.leg.wa.gov/"],
-        "notes": "华盛顿州法规和法案。",
-    },
-    {
-        "domain": "oregonlegislature.gov", "name": "Oregon Legislature", "level": "A",
-        "source_type": "Official legislation", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://www.oregonlegislature.gov/"],
-        "notes": "俄勒冈州法规和法案。",
-    },
-    {
-        "domain": "leg.colorado.gov", "name": "Colorado Legislature", "level": "A",
-        "source_type": "Official legislation", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://leg.colorado.gov/"],
-        "notes": "科罗拉多州法规和法案。",
-    },
-    {
-        "domain": "revisor.mn.gov", "name": "Minnesota Revisor", "level": "A",
-        "source_type": "Official legislation", "is_official": True,
-        "markets": ["US States"], "topics": ["All"],
-        "monitoring_urls": ["https://www.revisor.mn.gov/"],
-        "notes": "明尼苏达州法规和法案。",
-    },
+]
+
+SOURCES.extend(build_us_state_source_records())
+
+SOURCES.extend([
     # ---------------- Canada ----------------
     {
         "domain": "laws-lois.justice.gc.ca", "name": "Justice Laws", "level": "A",
@@ -334,7 +277,7 @@ SOURCES: list[dict[str, object]] = [
         "monitoring_urls": ["https://www.dianqizazhi.com/"],
         "notes": "国内家电行业政策、市场和行业新闻线索。",
     },
-]
+])
 
 TOPICS = [
     "Product Safety",
@@ -381,11 +324,20 @@ def _market_matches(source: dict[str, object], jurisdictions: Iterable[str] | No
     return "Global" in markets or bool(selected & markets)
 
 
+def _state_matches(source: dict[str, object], selected_states: Iterable[str] | None) -> bool:
+    selected = set(selected_states or [])
+    source_state = str(source.get("state") or "")
+    if not selected or not source_state:
+        return True
+    return source_state in selected
+
+
 def filtered_sources(
     jurisdictions: list[str] | None = None,
     scope: str = "curated",
     topic: str | None = None,
     selected_domains: list[str] | None = None,
+    selected_states: list[str] | None = None,
 ) -> list[dict[str, object]]:
     selected_domain_set = set(selected_domains or [])
     results: list[dict[str, object]] = []
@@ -393,6 +345,8 @@ def filtered_sources(
         if selected_domain_set and source["domain"] not in selected_domain_set:
             continue
         if not _market_matches(source, jurisdictions) or not _topic_matches(source, topic):
+            continue
+        if not _state_matches(source, selected_states):
             continue
         if scope == "official" and not source["is_official"]:
             continue
@@ -407,11 +361,14 @@ def all_domains(
     scope: str = "curated",
     topic: str | None = None,
     selected_domains: list[str] | None = None,
+    selected_states: list[str] | None = None,
 ) -> list[str]:
     return sorted(
         {
             str(item["domain"])
-            for item in filtered_sources(jurisdictions, scope, topic, selected_domains)
+            for item in filtered_sources(
+                jurisdictions, scope, topic, selected_domains, selected_states
+            )
         }
     )
 
@@ -431,6 +388,7 @@ def source_metadata(url: str) -> dict[str, str | bool]:
                 "source_name": str(source["name"]),
                 "source_level": str(source["level"]),
                 "source_type": str(source["source_type"]),
+                "state": str(source.get("state") or ""),
                 "domain": domain,
             }
     return {
@@ -441,6 +399,7 @@ def source_metadata(url: str) -> dict[str, str | bool]:
         "source_name": host or "Unknown",
         "source_level": "D",
         "source_type": "Unregistered web source",
+        "state": "",
         "domain": host,
     }
 
@@ -456,6 +415,7 @@ def source_rows() -> list[dict[str, object]]:
                 "来源类型": source["source_type"],
                 "官方原文源": "是" if source["is_official"] else "否",
                 "适用市场": ", ".join(source.get("markets") or []),
+                "州/地区": source.get("state") or "",
                 "关注主题": ", ".join(source.get("topics") or []),
                 "监控入口": "\n".join(source.get("monitoring_urls") or []),
                 "说明": source.get("notes") or "",
