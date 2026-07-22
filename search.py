@@ -9,7 +9,10 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 import requests
-import trafilatura
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
@@ -953,7 +956,12 @@ def fetch_document(url: str) -> tuple[str, str]:
         text = "\n".join((page.extract_text() or "") for page in reader.pages[:80])
     else:
         html = resp.text
-        text = trafilatura.extract(html, include_links=False, include_tables=True) or ""
+        text = ""
+        if trafilatura is not None:
+            try:
+                text = trafilatura.extract(html, include_links=False, include_tables=True) or ""
+            except Exception:
+                text = ""
         if not text:
             text = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
     return text[: SETTINGS.max_fetch_chars], final_url
