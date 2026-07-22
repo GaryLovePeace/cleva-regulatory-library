@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -24,7 +25,7 @@ from us_state_sources import (
     state_domains,
 )
 
-USER_AGENT = "Cleva-Regulatory-Library/0.4 (+human-review-required)"
+USER_AGENT = "Cleva-Regulatory-Library/0.5 (+human-review-required)"
 
 TOPIC_KEYWORDS: dict[str, list[str]] = {
     "Product Safety": ["product safety", "consumer product safety", "recall", "market surveillance"],
@@ -73,6 +74,26 @@ CHINESE_QUERY_TERMS: dict[str, str] = {
 
 FEDERAL_DOMAINS = {"federalregister.gov", "ecfr.gov", "regulations.gov"}
 
+CURRENT_YEAR = datetime.now(timezone.utc).year
+SEARCH_GOAL_LATEST = "latest"
+SEARCH_GOAL_CURRENT = "current"
+SEARCH_GOAL_ALL = "all"
+
+LATEST_TITLE_TERMS = (
+    "update", "updated", "changes", "change", "amendment", "amending",
+    "consultation", "guidance", "new rule", "new regulation", "effective",
+    "implementation", "transitional", "notice", "news",
+)
+CURRENT_LAW_TITLE_TERMS = (
+    "regulation", "regulations", "act", "directive", "statutory instrument",
+    "consolidated", "current version", "code", "law",
+)
+STOP_QUERY_TERMS = {
+    "governor", "official", "regulation", "regulations", "law", "laws",
+    "rule", "rules", "update", "latest", "state", "states", "united",
+    "government", "website", "source", "article",
+}
+
 
 @dataclass(frozen=True)
 class QueryIntent:
@@ -83,6 +104,7 @@ class QueryIntent:
     state: str | None = None
     inferred_jurisdictions: tuple[str, ...] = ()
     priority_domains: tuple[str, ...] = ()
+    required_terms: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
 
     @property
@@ -100,6 +122,7 @@ class SearchResult:
     relevance_score: int = 0
     relevance_reasons: list[str] | None = None
     intent_kind: str = "general"
+    result_category: str = "其他资料"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -177,6 +200,30 @@ def detect_query_intent(query: str, state_hint: str | None = None) -> QueryInten
             notes=("识别为欧盟法规编号检索", "优先EUR-Lex并要求结果包含法规编号"),
         )
 
+    if "governor" in raw.lower():
+        topic_tokens = [
+            token.lower()
+            for token in re.findall(r"[A-Za-z0-9-]{3,}", add_english_terms(raw))
+            if token.lower() not in STOP_QUERY_TERMS
+            and (not state or token.lower() not in state.lower().split())
+        ]
+        required = tuple(dict.fromkeys(["governor", *topic_tokens[:4]]))
+        inferred = ("US States",) if state else ()
+        notes = [
+            "识别为Governor与法规主题的组合检索",
+            "Governor不会被单独运行；结果必须同时匹配Governor和至少一个主题词",
+        ]
+        if state:
+            notes.append(f"已识别州：{state}")
+        return QueryIntent(
+            kind="governor_topic",
+            state=state,
+            inferred_jurisdictions=inferred,
+            priority_domains=tuple(state_domains(state)) if state else (),
+            required_terms=required,
+            notes=tuple(notes),
+        )
+
     if state:
         return QueryIntent(
             kind="us_state_general",
@@ -213,7 +260,11 @@ def add_english_terms(query: str) -> str:
 
 
 def build_query_variants(
-    query: str, topic: str, search_mode: str, state_hint: str | None = None
+    query: str,
+    topic: str,
+    search_mode: str,
+    state_hint: str | None = None,
+    search_goal: str = SEARCH_GOAL_ALL,
 ) -> list[str]:
     intent = detect_query_intent(query, state_hint)
     base = add_english_terms(query)
@@ -243,6 +294,51 @@ def build_query_variants(
             [exact, f"{exact} consolidated text amendment", f"{exact} implementation guidance"]
         )[: max(1, SETTINGS.deep_search_queries)]
 
+    if intent.kind == "governor_topic":
+        quoted = " ".join(f'"{term}"' for term in intent.required_terms if term)
+        if intent.state and f'"{intent.state}"' not in quoted:
+            quoted = f'{quoted} "{intent.state}"'
+        variants = [quoted or base]
+        if search_goal == SEARCH_GOAL_LATEST or search_mode == "deep":
+            variants.extend([
+                f"{quoted or base} signed veto executive order {CURRENT_YEAR}",
+                f"{quoted or base} latest policy announcement {CURRENT_YEAR}",
+            ])
+        return _dedupe_queries(variants)[: max(1, SETTINGS.deep_search_queries)]
+
+    special_variants: list[str] = []
+    if re.search(r"\bGB\s*CLP\b", query, flags=re.IGNORECASE):
+        special_variants = [
+            f'"GB CLP" latest update {CURRENT_YEAR}',
+            f'"GB CLP" amendment regulations {CURRENT_YEAR}',
+            f'"GB CLP" HSE changes {CURRENT_YEAR}',
+            f'"Chemicals (Health and Safety)" "GB CLP" {CURRENT_YEAR}',
+        ]
+
+    if search_goal == SEARCH_GOAL_LATEST:
+        variants = [
+            *special_variants,
+            f"{base} latest update amendment changes guidance {CURRENT_YEAR}",
+            f"{base} regulator official update {CURRENT_YEAR}",
+            f"{base} new rules effective date {CURRENT_YEAR}",
+        ]
+        if search_mode == "deep":
+            variants.extend([
+                f"{base} consultation proposed rule implementation {CURRENT_YEAR}",
+                f"{base} {CURRENT_YEAR - 1} {CURRENT_YEAR} official notice",
+            ])
+        cap = max(2, SETTINGS.deep_search_queries if search_mode == "deep" else min(3, SETTINGS.deep_search_queries))
+        return _dedupe_queries(variants)[:cap]
+
+    if search_goal == SEARCH_GOAL_CURRENT:
+        variants = [
+            base,
+            f"{base} official legislation current consolidated text",
+            f"{base} regulation statutory instrument legal text",
+        ]
+        cap = max(1, SETTINGS.deep_search_queries if search_mode == "deep" else 2)
+        return _dedupe_queries(variants)[:cap]
+
     if search_mode != "deep":
         return [base]
 
@@ -259,7 +355,6 @@ def build_query_variants(
     )
     return _dedupe_queries(variants)[: max(1, SETTINGS.deep_search_queries)]
 
-
 def _dedupe_queries(queries: Iterable[str]) -> list[str]:
     deduped: list[str] = []
     for item in queries:
@@ -269,18 +364,56 @@ def _dedupe_queries(queries: Iterable[str]) -> list[str]:
     return deduped
 
 
-def _rank_domains(domains: list[str], intent: QueryIntent, search_mode: str) -> list[str]:
+def _rank_domains(
+    domains: list[str],
+    intent: QueryIntent,
+    search_mode: str,
+    search_goal: str = SEARCH_GOAL_ALL,
+    topic: str = "All",
+) -> list[str]:
     unique = list(dict.fromkeys(domains))
-    priority = list(dict.fromkeys(domain for domain in intent.priority_domains if domain in unique))
-    remainder = [domain for domain in unique if domain not in priority]
+    intent_priority = list(dict.fromkeys(domain for domain in intent.priority_domains if domain in unique))
 
-    # Exact legal citations should not be diluted across dozens of unrelated sources.
+    def goal_key(domain: str) -> tuple[int, int]:
+        meta = source_metadata(f"https://{domain}")
+        source_type = str(meta.get("source_type") or "").lower()
+        name = str(meta.get("source_name") or "").lower()
+        score = 0
+        if search_goal == SEARCH_GOAL_LATEST:
+            if "regulator" in source_type or "government guidance" in source_type:
+                score += 40
+            if "official state environmental agency" in source_type:
+                score += 35
+            if domain in {"hse.gov.uk", "gov.uk", "commission.europa.eu", "ec.europa.eu"}:
+                score += 30
+            if "legislation" in source_type:
+                score += 15
+        elif search_goal == SEARCH_GOAL_CURRENT:
+            if "legislation" in source_type:
+                score += 45
+            if str(meta.get("source_level")) == "A":
+                score += 20
+        else:
+            if str(meta.get("source_level")) == "A":
+                score += 15
+            elif str(meta.get("source_level")) == "B":
+                score += 10
+        if topic == "Chemicals / REACH / RoHS / PFAS" and domain == "hse.gov.uk":
+            score += 25
+        if "governor" in name and intent.kind != "governor_topic":
+            score -= 25
+        return score, -unique.index(domain)
+
+    remainder = [domain for domain in unique if domain not in intent_priority]
+    remainder.sort(key=goal_key, reverse=True)
+
     if intent.is_exact_legal_citation:
         cap = 4 if search_mode in {"quick", "official"} else 8
+    elif intent.kind == "governor_topic":
+        cap = 6 if search_mode in {"quick", "official"} else 10
     else:
         cap = 8 if search_mode == "quick" else (10 if search_mode == "official" else 14)
-    return (priority + remainder)[:cap]
-
+    return (intent_priority + remainder)[:cap]
 
 def _domain_batches(query: str, domains: list[str], *, exact_citation: bool) -> list[list[str]]:
     if not domains:
@@ -312,7 +445,14 @@ def _query_with_domains(query: str, domains: list[str]) -> str:
     return f"{query} ({domain_clause})"
 
 
-def search_brave(query: str, domains: list[str], count: int, *, broad: bool = False) -> list[SearchResult]:
+def search_brave(
+    query: str,
+    domains: list[str],
+    count: int,
+    *,
+    broad: bool = False,
+    freshness: str | None = None,
+) -> list[SearchResult]:
     if not SETTINGS.brave_search_api_key:
         raise RuntimeError("BRAVE_SEARCH_API_KEY is not configured")
     final_query = query if broad else _query_with_domains(query, domains)
@@ -326,6 +466,7 @@ def search_brave(query: str, domains: list[str], count: int, *, broad: bool = Fa
             "safesearch": "moderate",
             "search_lang": "en",
             "extra_snippets": "true",
+            **({"freshness": freshness} if freshness else {}),
         },
         headers={"X-Subscription-Token": SETTINGS.brave_search_api_key, "Accept": "application/json"},
         timeout=SETTINGS.request_timeout,
@@ -350,7 +491,14 @@ def search_brave(query: str, domains: list[str], count: int, *, broad: bool = Fa
     return results
 
 
-def search_serper(query: str, domains: list[str], count: int, *, broad: bool = False) -> list[SearchResult]:
+def search_serper(
+    query: str,
+    domains: list[str],
+    count: int,
+    *,
+    broad: bool = False,
+    freshness: str | None = None,
+) -> list[SearchResult]:
     if not SETTINGS.serper_api_key:
         raise RuntimeError("SERPER_API_KEY is not configured")
     final_query = query if broad else _query_with_domains(query, domains)
@@ -395,6 +543,84 @@ def search_federal_register(query: str, count: int = 20) -> list[SearchResult]:
     ]
 
 
+def freshness_for_range(time_range: str) -> str | None:
+    now = datetime.now(timezone.utc).date()
+    if time_range == "30d":
+        return "pm"
+    if time_range == "90d":
+        start = now - timedelta(days=90)
+        return f"{start.isoformat()}to{now.isoformat()}"
+    if time_range == "1y":
+        return "py"
+    if time_range == "3y":
+        start = now - timedelta(days=365 * 3)
+        return f"{start.isoformat()}to{now.isoformat()}"
+    return None
+
+
+def _parse_result_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    relative = re.search(r"(\d+)\s+(day|week|month|year)s?\s+ago", raw, flags=re.IGNORECASE)
+    if relative:
+        amount = int(relative.group(1))
+        unit = relative.group(2).lower()
+        days = amount * {"day": 1, "week": 7, "month": 30, "year": 365}[unit]
+        return datetime.now(timezone.utc) - timedelta(days=days)
+    iso_match = re.search(r"(20\d{2}|19\d{2})-(\d{2})-(\d{2})", raw)
+    if iso_match:
+        try:
+            return datetime(
+                int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)),
+                tzinfo=timezone.utc,
+            )
+        except ValueError:
+            return None
+    year_match = re.search(r"\b(20\d{2}|19\d{2})\b", raw)
+    if year_match:
+        return datetime(int(year_match.group(1)), 1, 1, tzinfo=timezone.utc)
+    return None
+
+
+def _age_days(value: str | None) -> int | None:
+    parsed = _parse_result_date(value)
+    if not parsed:
+        return None
+    return max(0, (datetime.now(timezone.utc) - parsed).days)
+
+
+def _result_category(item: SearchResult) -> str:
+    meta = source_metadata(item.url)
+    source_type = str(meta.get("source_type") or "").lower()
+    title = (item.title or "").lower()
+    level = str(meta.get("source_level") or "D")
+    if not bool(meta.get("is_official")):
+        return "专业解读 / 法规情报"
+    if "legislation" in source_type:
+        return "正式法规原文"
+    if any(term in title for term in LATEST_TITLE_TERMS) or "guidance" in source_type or "regulator" in source_type or "environmental agency" in source_type:
+        return "官方更新 / 实施指南"
+    if level == "A" and any(term in title for term in ("regulation", "regulations", "act", "statutory instrument", "directive")):
+        return "正式法规原文"
+    return "其他官方资料"
+
+
+def _significant_query_terms(query: str, state: str | None = None) -> list[str]:
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z0-9-]{3,}", add_english_terms(query)):
+        lowered = token.lower()
+        if lowered in STOP_QUERY_TERMS:
+            continue
+        if state and lowered in state.lower().split():
+            continue
+        if lowered not in terms:
+            terms.append(lowered)
+    return terms
+
+
 def _normalized(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
@@ -405,6 +631,7 @@ def _score_result(
     jurisdictions: list[str],
     topic: str,
     intent: QueryIntent,
+    search_goal: str = SEARCH_GOAL_ALL,
 ) -> tuple[int, list[str]]:
     title = item.title or ""
     snippet = item.snippet or ""
@@ -413,6 +640,7 @@ def _score_result(
     combined_normalized = _normalized(combined)
     meta = source_metadata(item.url)
     domain = str(meta.get("domain") or (urlparse(item.url).hostname or ""))
+    source_type = str(meta.get("source_type") or "").lower()
     score = 0
     reasons: list[str] = []
 
@@ -455,6 +683,25 @@ def _score_result(
             score -= 120
             reasons.append("州级问题命中联邦法规源 -120")
 
+    if intent.kind == "governor_topic":
+        required = list(intent.required_terms) or ["governor", *_significant_query_terms(query, intent.state)[:3]]
+        governor_hit = "governor" in combined_lower
+        topic_terms = [term for term in required if term != "governor"]
+        topic_hit_count = sum(1 for term in topic_terms if term.lower() in combined_lower)
+        if governor_hit:
+            score += 45
+            reasons.append("匹配Governor +45")
+        else:
+            score -= 120
+            reasons.append("未匹配Governor -120")
+        if topic_terms and topic_hit_count:
+            points = min(20 + topic_hit_count * 12, 56)
+            score += points
+            reasons.append(f"同时匹配法规主题词 +{points}")
+        elif topic_terms:
+            score -= 100
+            reasons.append("未匹配Governor之外的法规主题词 -100")
+
     if topic and topic != "All":
         topic_hits = sum(1 for term in TOPIC_KEYWORDS.get(topic, []) if term.lower() in combined_lower)
         if topic_hits:
@@ -462,16 +709,73 @@ def _score_result(
             score += points
             reasons.append(f"主题关键词匹配 +{points}")
 
-    significant_tokens = [
-        token.lower()
-        for token in re.findall(r"[A-Za-z0-9]{3,}", add_english_terms(query))
-        if token.lower() not in {"regulation", "official", "united", "states", "european"}
-    ]
+    significant_tokens = _significant_query_terms(query, intent.state)
     token_hits = sum(1 for token in set(significant_tokens) if token in combined_lower)
     if token_hits:
         points = min(token_hits * 4, 24)
         score += points
         reasons.append(f"查询词匹配 +{points}")
+
+    age_days = _age_days(item.published_date)
+    title_lower = title.lower()
+    title_years = [int(value) for value in re.findall(r"\b(20\d{2}|19\d{2})\b", title)]
+    title_year = max(title_years) if title_years else None
+    latest_term_hits = sum(1 for term in LATEST_TITLE_TERMS if term in title_lower)
+    current_term_hits = sum(1 for term in CURRENT_LAW_TITLE_TERMS if term in title_lower)
+
+    if search_goal == SEARCH_GOAL_LATEST:
+        if "regulator" in source_type or "government guidance" in source_type or "environmental agency" in source_type:
+            score += 28
+            reasons.append("主管机构/实施来源 +28")
+        if domain == "hse.gov.uk" and ("clp" in combined_lower or topic == "Chemicals / REACH / RoHS / PFAS"):
+            score += 35
+            reasons.append("GB CLP主管机构HSE +35")
+        if latest_term_hits:
+            points = min(18 + latest_term_hits * 5, 38)
+            score += points
+            reasons.append(f"更新/修订类标题 +{points}")
+        if title_year == CURRENT_YEAR:
+            score += 35
+            reasons.append(f"标题包含当前年份{CURRENT_YEAR} +35")
+        elif title_year == CURRENT_YEAR - 1:
+            score += 18
+            reasons.append(f"标题包含上一年份{CURRENT_YEAR - 1} +18")
+        elif title_year and title_year <= CURRENT_YEAR - 5:
+            score -= 30
+            reasons.append(f"标题年份较旧({title_year}) -30")
+        if age_days is not None:
+            if age_days <= 31:
+                score += 60
+                reasons.append("近31天 +60")
+            elif age_days <= 90:
+                score += 50
+                reasons.append("近90天 +50")
+            elif age_days <= 365:
+                score += 35
+                reasons.append("近一年 +35")
+            elif age_days <= 365 * 3:
+                score += 15
+                reasons.append("近三年 +15")
+            elif age_days > 365 * 5:
+                score -= 25
+                reasons.append("超过五年的旧资料 -25")
+        else:
+            reasons.append("未识别发布日期，不加新鲜度分")
+    elif search_goal == SEARCH_GOAL_CURRENT:
+        if "legislation" in source_type:
+            score += 40
+            reasons.append("正式立法来源 +40")
+        if current_term_hits:
+            points = min(15 + current_term_hits * 4, 35)
+            score += points
+            reasons.append(f"法规原文/现行文本标题 +{points}")
+        if latest_term_hits and "legislation" not in source_type:
+            score -= 5
+            reasons.append("动态新闻非原文 -5")
+    else:
+        if age_days is not None and age_days <= 365:
+            score += 10
+            reasons.append("近一年资料 +10")
 
     if jurisdictions == ["US States"] and domain in FEDERAL_DOMAINS:
         score -= 80
@@ -479,10 +783,11 @@ def _score_result(
 
     return score, reasons
 
-
 def _minimum_score(intent: QueryIntent) -> int:
     if intent.is_exact_legal_citation:
         return 40
+    if intent.kind == "governor_topic":
+        return 20
     if intent.kind == "us_state_general":
         return 5
     if intent.kind == "us_state_bill_missing_state":
@@ -499,6 +804,8 @@ def search_all(
     topic: str = "All",
     selected_domains: list[str] | None = None,
     selected_states: list[str] | None = None,
+    search_goal: str = SEARCH_GOAL_ALL,
+    time_range: str = "all",
 ) -> list[SearchResult]:
     provider = (provider or SETTINGS.search_provider).lower()
     state_hint = selected_states[0] if selected_states and len(selected_states) == 1 else None
@@ -513,15 +820,15 @@ def search_all(
         selected_domains=selected_domains,
         selected_states=effective_states,
     )
-    domains = _rank_domains(domains, intent, search_mode)
-    variants = build_query_variants(query, topic, search_mode, state_hint)
+    domains = _rank_domains(domains, intent, search_mode, search_goal, topic)
+    variants = build_query_variants(query, topic, search_mode, state_hint, search_goal)
+    freshness = freshness_for_range(time_range)
     results: list[SearchResult] = []
     errors: list[str] = []
 
     if intent.kind == "us_state_bill_missing_state":
         return []
 
-    # Do not query Federal Register for an explicitly state-level bill.
     if "US Federal" in effective_jurisdictions and search_mode in {"official", "deep"} and not intent.state:
         try:
             results.extend(search_federal_register(variants[0], SETTINGS.max_search_results))
@@ -539,13 +846,18 @@ def search_all(
             for batch in batches:
                 try:
                     per_call = 8 if intent.is_exact_legal_citation else SETTINGS.max_search_results
-                    results.extend(search_fn(variant, batch, per_call))
+                    results.extend(search_fn(variant, batch, per_call, freshness=freshness))
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"{provider}: {exc}")
 
-        if search_mode == "deep":
+        broad_needed = search_mode == "deep" or intent.kind == "governor_topic"
+        if broad_needed:
             try:
-                results.extend(search_fn(variants[0], [], SETTINGS.max_search_results, broad=True))
+                results.extend(
+                    search_fn(
+                        variants[0], [], SETTINGS.max_search_results, broad=True, freshness=freshness
+                    )
+                )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{provider} broad search: {exc}")
 
@@ -559,25 +871,71 @@ def search_all(
         item.url = normalized_url
         item.intent_kind = intent.kind
         item.relevance_score, item.relevance_reasons = _score_result(
-            item, query, effective_jurisdictions, topic, intent
+            item, query, effective_jurisdictions, topic, intent, search_goal
         )
+        item.result_category = _result_category(item)
         if item.relevance_score >= _minimum_score(intent):
             ranked.append(item)
 
-    ranked.sort(
-        key=lambda item: (
-            item.relevance_score,
-            1 if source_metadata(item.url).get("is_official") else 0,
-            item.published_date or "",
-        ),
-        reverse=True,
-    )
+    def sort_key(item: SearchResult) -> tuple[int, int, int, str]:
+        category_weight = {
+            "官方更新 / 实施指南": 3 if search_goal == SEARCH_GOAL_LATEST else 1,
+            "正式法规原文": 3 if search_goal == SEARCH_GOAL_CURRENT else 2,
+            "其他官方资料": 1,
+            "专业解读 / 法规情报": 0,
+        }.get(item.result_category, 0)
+        official = 1 if source_metadata(item.url).get("is_official") else 0
+        parsed = _parse_result_date(item.published_date)
+        timestamp = int(parsed.timestamp()) if parsed else 0
+        return item.relevance_score, category_weight, official, timestamp
+
+    ranked.sort(key=sort_key, reverse=True)
 
     if not ranked and not results and errors:
         raise RuntimeError("; ".join(errors))
     limit = SETTINGS.max_deep_search_results if search_mode == "deep" else SETTINGS.max_search_results
     return ranked[:limit]
 
+
+def preview_search_plan(
+    query: str,
+    jurisdictions: list[str],
+    *,
+    search_mode: str = "quick",
+    topic: str = "All",
+    selected_domains: list[str] | None = None,
+    selected_states: list[str] | None = None,
+    search_goal: str = SEARCH_GOAL_ALL,
+    time_range: str = "all",
+) -> dict[str, Any]:
+    state_hint = selected_states[0] if selected_states and len(selected_states) == 1 else None
+    intent = detect_query_intent(query, state_hint)
+    effective_jurisdictions = resolve_jurisdictions(query, jurisdictions, state_hint)
+    scope = "official" if search_mode == "official" else "curated"
+    effective_states = [intent.state] if intent.state else (selected_states or None)
+    domains = all_domains(
+        effective_jurisdictions,
+        scope=scope,
+        topic=topic,
+        selected_domains=selected_domains,
+        selected_states=effective_states,
+    )
+    domains = _rank_domains(domains, intent, search_mode, search_goal, topic)
+    variants = build_query_variants(query, topic, search_mode, state_hint, search_goal)
+    actual_queries: list[str] = []
+    for variant in variants:
+        for batch in _domain_batches(variant, domains, exact_citation=intent.is_exact_legal_citation):
+            actual_queries.append(_query_with_domains(variant, batch))
+    if search_mode == "deep" or intent.kind == "governor_topic":
+        actual_queries.append(variants[0] + "  [全网补充检索]")
+    return {
+        "intent": intent,
+        "effective_jurisdictions": effective_jurisdictions,
+        "domains": domains,
+        "variants": variants,
+        "actual_queries": actual_queries,
+        "freshness": freshness_for_range(time_range),
+    }
 
 def fetch_document(url: str) -> tuple[str, str]:
     resp = requests.get(

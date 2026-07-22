@@ -1,4 +1,4 @@
-# Cleva Global Regulatory Library MVP v0.4
+# Cleva Global Regulatory Library MVP v0.5
 
 Cleva全球法规知识库用于搜索欧盟、英国、美国和加拿大的官方法规及专业法规情报，并通过人工审核将资料分流到：
 
@@ -6,6 +6,19 @@ Cleva全球法规知识库用于搜索欧盟、英国、美国和加拿大的官
 2. **法规情报库**：Intertek、TBT资讯网、REACH24H、CAA等专业机构的解读、预警、注册通知和行业动态。
 
 第三方页面不会被系统直接当成正式法规。人工审核时，只有补充并核验官方法规链接后，才能作为正式法规入库。
+
+
+## v0.5重点改进：最新法规动态与新鲜度排序
+
+- 新增“最新法规动态 / 现行法规原文 / 全部相关资料”搜索目标；
+- 新增最近30天、90天、1年、3年和全部时间筛选；
+- 调用Brave freshness过滤，减少历史资料干扰；
+- 最新动态模式优先监管机构、官方更新、修订、实施指南和近期页面；
+- 现行原文模式优先正式法规数据库、法定文书和合并文本；
+- UK化学品主题下优先HSE，并针对GB CLP自动扩展查询；
+- 结果按官方更新、正式法规原文、其他官方资料和专业解读分组；
+- 页面展示实际执行查询，便于核查Governor等词是否与法规主题组合；
+- Governor查询要求同时匹配Governor和至少一个法规主题词。
 
 ## v0.4重点改进：美国50州＋Washington, D.C.
 
@@ -132,4 +145,4 @@ data/regulatory_library.sqlite3
 
 本地使用可继续使用SQLite。Streamlit Community Cloud上的本地SQLite可能在重新部署后丢失，正式公司版应迁移至PostgreSQL等持久数据库。
 
-部署步骤见 `DEPLOY_TO_STREAMLIT.md`，从v0.3升级见 `UPDATE_FROM_V03.md`。
+部署步骤见 `DEPLOY_TO_STREAMLIT.md`，从v0.4升级见 `UPDATE_FROM_V04.md`。

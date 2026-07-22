@@ -9,7 +9,14 @@ import db
 from config import SETTINGS
 from exporters import intelligence_to_xlsx, regulation_to_docx, regulations_to_xlsx
 from llm import analyze_document
-from search import build_query_variants, detect_query_intent, enrich_result, resolve_jurisdictions, search_all
+from search import (
+    build_query_variants,
+    detect_query_intent,
+    enrich_result,
+    preview_search_plan,
+    resolve_jurisdictions,
+    search_all,
+)
 from source_registry import JURISDICTIONS, SOURCES, TOPICS, filtered_sources, source_rows
 from us_state_sources import US_STATE_NAMES
 
@@ -47,7 +54,7 @@ with st.sidebar:
     model_name = SETTINGS.deepseek_model if SETTINGS.llm_provider == "deepseek" else SETTINGS.openai_model
     st.write(f"LLM model: `{model_name}`")
     st.warning("AI结果仅供初筛。第三方解读不能直接替代官方法规原文。")
-    st.caption("v0.4：覆盖美国50州＋Washington, D.C.，支持多种州级法案编号、州立法网站和环境主管部门智能路由。")
+    st.caption("v0.5：新增最新动态/现行原文搜索目标、时间筛选、主管机构优先与新鲜度排序，并展示实际检索计划。")
     if SETTINGS.deployment_mode == "cloud_demo":
         st.warning("云端演示版当前使用本地 SQLite。应用重启或重新部署后，新增数据可能丢失；正式公司版应改用持久数据库。")
 
@@ -59,6 +66,20 @@ SEARCH_MODES = {
     "快速检索（推荐日常使用）": "quick",
     "仅官方来源（用于最终核验）": "official",
     "深度检索（多关键词 + 全网补充）": "deep",
+}
+
+SEARCH_GOALS = {
+    "最新法规动态 / 官方更新": "latest",
+    "现行法规原文 / 当前要求": "current",
+    "全部相关资料": "all",
+}
+
+TIME_RANGES = {
+    "最近30天": "30d",
+    "最近90天": "90d",
+    "最近一年": "1y",
+    "最近三年": "3y",
+    "全部时间": "all",
 }
 
 with search_tab:
@@ -92,6 +113,28 @@ with search_tab:
             st.warning("州级检索建议在搜索词中写明州名，或在这里选择州；否则官方来源范围过大，结果可能不够聚焦。")
 
     effective_selected_states = selected_states or ([detected_state] if detected_state else [])
+
+    goal_col, time_col = st.columns(2)
+    with goal_col:
+        goal_label = st.selectbox("搜索目标", list(SEARCH_GOALS), index=0)
+        search_goal = SEARCH_GOALS[goal_label]
+    with time_col:
+        default_time_label = "最近一年" if search_goal == "latest" else "全部时间"
+        time_labels = list(TIME_RANGES)
+        time_label = st.selectbox(
+            "发布时间范围",
+            time_labels,
+            index=time_labels.index(default_time_label),
+            help="Brave会按网页报告的发布时间或更新时间筛选。最新动态模式建议选择最近一年。",
+        )
+        time_range = TIME_RANGES[time_label]
+
+    if search_goal == "latest":
+        st.info("优先寻找近期官方更新、修订、实施指南和主管机构说明；旧法规会降低排序。")
+    elif search_goal == "current":
+        st.info("优先寻找当前有效的正式法规、法定文书和合并文本；动态新闻仅作辅助。")
+    else:
+        st.info("同时保留正式法规、官方更新和专业解读，适合建立完整专题资料。")
 
     c3, c4 = st.columns([1, 2])
     with c3:
@@ -134,9 +177,22 @@ with search_tab:
     if query.strip():
         state_hint = effective_selected_states[0] if len(effective_selected_states) == 1 else None
         intent = detect_query_intent(query, state_hint)
-        variants = build_query_variants(query, topic, search_mode, state_hint)
+        variants = build_query_variants(query, topic, search_mode, state_hint, search_goal)
         effective_jurisdictions = resolve_jurisdictions(query, jurisdictions, state_hint)
-        st.caption(f"本次将执行 {len(variants)} 组关键词；可检索的信息源约 {len(available_sources)} 个。")
+        plan = preview_search_plan(
+            query,
+            jurisdictions,
+            search_mode=search_mode,
+            topic=topic,
+            selected_domains=selected_domains or None,
+            selected_states=effective_selected_states or None,
+            search_goal=search_goal,
+            time_range=time_range,
+        )
+        st.caption(
+            f"本次将执行 {len(variants)} 组关键词；优先信息源 {len(plan['domains'])} 个；"
+            f"时间筛选：{plan['freshness'] or '不限'}。"
+        )
         if intent.notes:
             st.info("智能识别：" + "；".join(intent.notes))
         if effective_selected_states:
@@ -147,9 +203,18 @@ with search_tab:
                 + ", ".join(effective_jurisdictions)
                 + "。界面中的原选择不会被改写。"
             )
+        with st.expander("查看本次实际检索计划（用于核查AND组合和信息源范围）"):
+            st.write("关键词变体：")
+            for value in plan["variants"]:
+                st.code(value, language=None)
+            st.write("实际提交的限定网站查询：")
+            for value in plan["actual_queries"]:
+                st.code(value, language=None)
 
     if st.button("开始实时搜索", type="primary", disabled=not query.strip() or not jurisdictions):
-        run_id = db.create_search_run(query, jurisdictions, topic, provider, search_mode)
+        run_id = db.create_search_run(
+            query, jurisdictions, topic, provider, f"{search_mode}:{search_goal}:{time_range}"
+        )
         try:
             raw_results = search_all(
                 query,
@@ -159,6 +224,8 @@ with search_tab:
                 topic=topic,
                 selected_domains=selected_domains or None,
                 selected_states=effective_selected_states or None,
+                search_goal=search_goal,
+                time_range=time_range,
             )
         except Exception as exc:  # noqa: BLE001
             st.error(f"搜索失败：{exc}")
@@ -192,28 +259,46 @@ with search_tab:
             else:
                 st.warning("没有找到达到相关度阈值的结果，请调整地区、主题或关键词。")
 
-    for candidate_id, item in st.session_state.get("latest_results", []):
-        ai = item.get("ai_data") or {}
-        source_badge = "官方原文源" if item.get("is_official") else ("精选专业源" if item.get("is_curated") else "全网来源")
-        label = ai.get("chinese_title") or item.get("title")
-        with st.expander(f"{label}  |  {item.get('source_name')}  |  {source_badge}"):
-            st.markdown(f"[打开来源页面]({item.get('url')})")
-            st.write(item.get("snippet") or "")
-            cols = st.columns(6)
-            cols[0].metric("检索匹配分", item.get("relevance_score", 0))
-            cols[1].metric("来源等级", item.get("source_level") or "-")
-            cols[2].metric("来源类型", item.get("source_type") or "-")
-            cols[3].metric("地区", item.get("jurisdiction_group") or "-")
-            cols[4].metric("建议记录类型", ai.get("record_type") or "待审核")
-            cols[5].metric("AI相关度", ai.get("relevance_level") or "待审核")
-            if item.get("relevance_reasons"):
-                st.caption("排序依据：" + "；".join(item["relevance_reasons"][:5]))
-            if item.get("verification_required"):
-                st.warning("该页面不是法律原文，入正式法规库前必须找到并核验其引用的政府或法规数据库链接。")
-            if ai.get("summary_cn"):
-                st.markdown("**AI中文摘要**")
-                st.write(ai["summary_cn"])
-            st.caption(f"候选记录ID：{candidate_id}。请到“待审核”页面决定进入正式法规库或法规情报库。")
+    latest_results = st.session_state.get("latest_results", [])
+    category_order = [
+        "官方更新 / 实施指南",
+        "正式法规原文",
+        "其他官方资料",
+        "专业解读 / 法规情报",
+        "其他资料",
+    ]
+    grouped_results: dict[str, list[tuple[int, dict]]] = {}
+    for candidate_id, item in latest_results:
+        grouped_results.setdefault(item.get("result_category") or "其他资料", []).append((candidate_id, item))
+
+    for category in category_order:
+        rows = grouped_results.get(category) or []
+        if not rows:
+            continue
+        st.markdown(f"### {category}（{len(rows)}）")
+        for candidate_id, item in rows:
+            ai = item.get("ai_data") or {}
+            source_badge = "官方来源" if item.get("is_official") else ("精选专业源" if item.get("is_curated") else "全网来源")
+            label = ai.get("chinese_title") or item.get("title")
+            with st.expander(f"{label}  |  {item.get('source_name')}  |  {source_badge}"):
+                st.markdown(f"[打开来源页面]({item.get('url')})")
+                st.write(item.get("snippet") or "")
+                cols = st.columns(7)
+                cols[0].metric("检索匹配分", item.get("relevance_score", 0))
+                cols[1].metric("发布日期", item.get("published_date") or "-")
+                cols[2].metric("来源等级", item.get("source_level") or "-")
+                cols[3].metric("来源类型", item.get("source_type") or "-")
+                cols[4].metric("地区", item.get("jurisdiction_group") or "-")
+                cols[5].metric("建议记录类型", ai.get("record_type") or "待审核")
+                cols[6].metric("AI相关度", ai.get("relevance_level") or "待审核")
+                if item.get("relevance_reasons"):
+                    st.caption("排序依据：" + "；".join(item["relevance_reasons"][:7]))
+                if item.get("verification_required"):
+                    st.warning("该页面不是法律原文，入正式法规库前必须找到并核验其引用的政府或法规数据库链接。")
+                if ai.get("summary_cn"):
+                    st.markdown("**AI中文摘要**")
+                    st.write(ai["summary_cn"])
+                st.caption(f"候选记录ID：{candidate_id}。请到“待审核”页面决定进入正式法规库或法规情报库。")
 
 with review_tab:
     st.subheader("候选资料人工审核")

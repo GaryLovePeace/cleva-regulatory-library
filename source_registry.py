@@ -69,8 +69,11 @@ SOURCES: list[dict[str, object]] = [
         "source_type": "Regulator / government guidance", "is_official": True,
         "markets": ["UK"],
         "topics": ["Product Safety", "Machinery", "Chemicals / REACH / RoHS / PFAS", "Noise / Vibration / Outdoor Equipment"],
-        "monitoring_urls": ["https://www.hse.gov.uk/"],
-        "notes": "机械、工作场所安全、化学品和噪声等。",
+        "monitoring_urls": [
+            "https://www.hse.gov.uk/",
+            "https://www.hse.gov.uk/chemical-classification/legal/",
+        ],
+        "notes": "机械、工作场所安全、化学品和噪声等；GB CLP更新优先来源。",
     },
     # ---------------- US federal ----------------
     {
@@ -391,6 +394,19 @@ def source_metadata(url: str) -> dict[str, str | bool]:
                 "state": str(source.get("state") or ""),
                 "domain": domain,
             }
+    government_host = host.endswith(".gov") or host.endswith(".gov.uk") or host.endswith(".gc.ca")
+    if government_host:
+        return {
+            "is_official": True,
+            "is_curated": False,
+            "verification_required": False,
+            "jurisdiction_group": "Government source",
+            "source_name": host,
+            "source_level": "B",
+            "source_type": "Unregistered government source",
+            "state": "",
+            "domain": host,
+        }
     return {
         "is_official": False,
         "is_curated": False,
